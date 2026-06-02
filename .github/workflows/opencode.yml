@@ -1,4 +1,4 @@
-name: OpenCode Agent
+name: OpenCode Production Agent
 
 on:
   issues:
@@ -13,6 +13,7 @@ permissions:
   pull-requests: write
   issues: write
   id-token: write
+  actions: read
 
 jobs:
   opencode:
@@ -24,9 +25,8 @@ jobs:
         github.event_name == 'issues' &&
         (
           contains(github.event.issue.body, '/oc') ||
-          contains(github.event.issue.body, '/opencode') ||
           contains(github.event.issue.title, '/oc') ||
-          contains(github.event.issue.title, '/opencode')
+          contains(github.event.issue.body, '/opencode')
         )
       ) ||
       (
@@ -45,29 +45,102 @@ jobs:
       )
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Run OpenCode (free model)
+      # -------------------------
+      # Extract task (stable input layer)
+      # -------------------------
+      - name: Extract task
+        id: task
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let task = "";
+
+            if (context.eventName === "issues") {
+              task = `${context.payload.issue.title}\n\n${context.payload.issue.body || ""}`;
+            }
+
+            if (context.eventName === "issue_comment") {
+              task = context.payload.comment.body;
+            }
+
+            if (context.eventName === "pull_request_review_comment") {
+              task = context.payload.comment.body;
+            }
+
+            if (!task || task.trim().length < 3) {
+              core.setFailed("Empty task input");
+            }
+
+            core.setOutput("task", task);
+
+      # -------------------------
+      # Primary model
+      # -------------------------
+      - name: Run OpenCode (primary)
+        id: primary
+        continue-on-error: true
         uses: anomalyco/opencode/github@latest
         with:
           model: opencode/qwen-3.6-plus
           prompt: |
-            You are an autonomous software engineering agent.
-
-            You are running inside a GitHub Actions sandbox.
-
-            IMPORTANT RULES:
-
-            1. Only act if explicitly invoked via /oc or /opencode
-            2. Use ONLY the triggering issue or comment as the task source
-            3. Do not process unrelated issues or repo context beyond necessity
-            4. Keep changes minimal and safe
-            5. Run tests if available
-            6. Create a branch and open a PR
+            You are a production-grade autonomous coding agent.
 
             TASK:
-            Implement the request described in the triggering event.
+            ${{ steps.task.outputs.task }}
+
+            RULES:
+            - make minimal safe changes
+            - run tests if present
+            - open a PR with changes
+            - do not delete repository data
+            - do not modify unrelated files
+
+      # -------------------------
+      # Fallback model (more stable reasoning)
+      # -------------------------
+      - name: Run OpenCode (fallback)
+        if: steps.primary.outcome == 'failure'
+        id: fallback
+        continue-on-error: true
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/glm-4.5
+          prompt: |
+            PRIMARY MODEL FAILED. ENTERING FALLBACK MODE.
+
+            TASK:
+            ${{ steps.task.outputs.task }}
+
+            RULES:
+            - prioritize correctness over completeness
+            - prefer small patch fixes
+            - ensure code compiles/tests pass
+            - open PR if safe
+
+      # -------------------------
+      # Safe mode (last resort)
+      # -------------------------
+      - name: Run OpenCode (safe mode)
+        if: steps.fallback.outcome == 'failure'
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/gpt-5-mini
+          prompt: |
+            SAFE MODE EXECUTION
+
+            Previous models failed.
+
+            TASK:
+            ${{ steps.task.outputs.task }}
+
+            RULES:
+            - single-file edits only
+            - no refactors
+            - no deletions
+            - minimal patch only
+            - open PR only if confident
