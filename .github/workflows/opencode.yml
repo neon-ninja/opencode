@@ -98,7 +98,7 @@ jobs:
         continue-on-error: true
         uses: anomalyco/opencode/github@latest
         with:
-          model: GLM-4.5-Air
+          model: opencode/qwen-3.6-plus
           prompt: |
             You are a production-grade autonomous coding agent.
 
