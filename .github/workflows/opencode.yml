@@ -15,10 +15,6 @@ permissions:
   id-token: write
   actions: read
 
-concurrency:
-  group: opencode-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
   opencode:
     runs-on: ubuntu-latest
@@ -102,7 +98,7 @@ jobs:
         continue-on-error: true
         uses: anomalyco/opencode/github@latest
         with:
-          model: opencode/qwen-3.6-plus
+          model: GLM-4.5-Air
           prompt: |
             You are a production-grade autonomous coding agent.
 
